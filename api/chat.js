@@ -1,5 +1,5 @@
 // Vercel Serverless Function — roda no servidor, sem CORS
-// Novo endpoint router.huggingface.co (api-inference foi descontinuado)
+// v4.0.6 — modelo trocado para Mistral-7B (gratuito, sem consumo de créditos)
 export default async function handler(req, res) {
   // Apenas POST permitido
   if (req.method !== 'POST') {
@@ -27,7 +27,7 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'meta-llama/Llama-3.3-70B-Instruct',
+        model: 'mistralai/Mistral-7B-Instruct-v0.3',
         messages,
         max_tokens: 3000,
         temperature: 0.6
