@@ -1,5 +1,5 @@
 // Vercel Serverless Function — roda no servidor, sem CORS
-// v4.0.7 — debug completo com JSON.stringify no error handler
+// v4.0.8 — modelo HuggingFaceH4/zephyr-7b-beta com template correto
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -16,9 +16,10 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Campo "messages" inválido ou ausente.' });
   }
 
-  // Log diagnóstico no servidor (visível nos logs da Vercel)
-  console.log(`[API v4.0.7] Agente ${agentId} iniciado. Token: Bearer ${token.slice(0, 8)}...`);
+  console.log(`[API v4.0.8] Agente ${agentId} iniciado. Token: Bearer ${token.slice(0, 8)}...`);
 
+  // Zephyr usa o chat template padrão OpenAI — router.huggingface.co aceita direto
+  // com o formato messages[], sem precisar montar prompt manualmente
   const HF_URL = 'https://router.huggingface.co/v1/chat/completions';
 
   let hfRes;
@@ -26,29 +27,26 @@ export default async function handler(req, res) {
     hfRes = await fetch(HF_URL, {
       method: 'POST',
       headers: {
-        // Apenas os headers mínimos que o router do HF aceita
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'mistralai/Mistral-7B-Instruct-v0.3',
-        messages,
+        model: 'HuggingFaceH4/zephyr-7b-beta',
+        messages,           // formato OpenAI: [{role, content}] — Zephyr aceita nativamente
         max_tokens: 1500,
-        temperature: 0.6
+        temperature: 0.7
       })
     });
   } catch (networkErr) {
-    // Falha de rede no servidor (raro, mas possível)
     console.error(`[API] Agente ${agentId} — falha de rede:`, networkErr.message);
-    return res.status(502).json({ error: `Falha de rede ao contatar HuggingFace: ${networkErr.message}` });
+    return res.status(502).json({ error: `Falha de rede: ${networkErr.message}` });
   }
 
-  // Lê o body da resposta UMA VEZ como texto para não perder dados
+  // Lê como texto bruto para debug completo (evita [object Object])
   const rawText = await hfRes.text();
+  console.log(`[API] Agente ${agentId} — status ${hfRes.status}. Body: ${rawText.slice(0, 300)}`);
 
   if (!hfRes.ok) {
-    // Exibe o JSON completo — sem [object Object]
-    console.error(`[API] Agente ${agentId} — HF retornou ${hfRes.status}:`, rawText);
     return res.status(502).json({
       error: `HuggingFace erro ${hfRes.status}: ${rawText}`
     });
@@ -60,7 +58,6 @@ export default async function handler(req, res) {
     console.log(`[API] Agente ${agentId} concluído com sucesso.`);
     return res.status(200).json({ content });
   } catch (parseErr) {
-    console.error(`[API] Agente ${agentId} — falha ao parsear JSON:`, rawText);
-    return res.status(502).json({ error: `Resposta inválida da API: ${rawText}` });
+    return res.status(502).json({ error: `Resposta inválida: ${rawText}` });
   }
 }

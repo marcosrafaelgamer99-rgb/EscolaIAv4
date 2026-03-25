@@ -163,7 +163,7 @@ export default function App() {
 
       </div>
 
-      <span className="version-tag">v4.0.7</span>
+      <span className="version-tag">v4.0.8</span>
     </div>
   );
 }
