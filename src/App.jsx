@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { HfInference } from '@huggingface/inference';
 import './App.css';
 
+// ─── Definição dos Agentes ────────────────────────────────────────────────────
 const AGENTS = [
   {
     id: 1,
@@ -11,7 +12,7 @@ const AGENTS = [
   {
     id: 2,
     name: 'ANALISTA',
-    sysMsg: 'Você é o Agente 2 (Analista Crítico). Avalie o texto recebido. Aponte lacunas, imprecisões ou dados incompletos de forma objetiva e numerada.'
+    sysMsg: 'Você é o Agente 2 (Analista Crítico). Avalie o texto recebido e aponte lacunas, imprecisões ou dados incompletos de forma objetiva e numerada.'
   },
   {
     id: 3,
@@ -21,34 +22,37 @@ const AGENTS = [
   {
     id: 4,
     name: 'FINALIZADOR',
-    sysMsg: 'Você é o Agente 4 (Finalizador). Pegue o texto do estágio anterior e entregue ao Marcos com formatação markdown clara e profissional, com uma frase de abertura amigável e outra de encerramento.'
+    sysMsg: 'Você é o Agente 4 (Finalizador). Pegue o texto do estágio anterior e entregue ao Marcos com formatação markdown clara, uma frase de abertura amigável e uma de encerramento.'
   }
 ];
 
-async function callLLM(hf, agentId, systemMsg, userContent) {
-  console.log(`[EscolaIA] Agente ${agentId} iniciando via HfInference...`);
+// ─── Chamada ao LLM via HfInference (sem fetch() manual, sem headers custom) ─
+async function callAgent(hf, agentId, systemMsg, userContent) {
+  console.log(`[EscolaIA] Agente ${agentId} (${AGENTS[agentId - 1].name}) iniciado.`);
 
-  // HfInference cuida dos headers, CORS e auth automaticamente
+  // Apenas o model ID — a biblioteca gerencia URL, headers e auth internamente
   const result = await hf.chatCompletion({
     model: 'meta-llama/Llama-3.3-70B-Instruct',
     messages: [
       { role: 'system', content: systemMsg },
-      { role: 'user', content: userContent }
+      { role: 'user',   content: userContent }
     ],
     max_tokens: 3000,
     temperature: 0.6
   });
 
-  console.log(`[EscolaIA] Agente ${agentId} respondeu com sucesso.`);
-  return result.choices[0].message.content;
+  const output = result.choices[0].message.content;
+  console.log(`[EscolaIA] Agente ${agentId} concluído.`);
+  return output;
 }
 
+// ─── Componente Principal ─────────────────────────────────────────────────────
 export default function App() {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [running, setRunning] = useState(false);
+  const [messages,   setMessages]   = useState([]);
+  const [input,      setInput]      = useState('');
+  const [running,    setRunning]    = useState(false);
   const [agentLabel, setAgentLabel] = useState('Sistema Online');
-  const inputRef = useRef(null);
+  const inputRef  = useRef(null);
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -56,49 +60,50 @@ export default function App() {
   }, [messages]);
 
   const addMsg = (role, text) =>
-    setMessages(prev => [...prev, { role, text, id: Date.now() + Math.random() }]);
+    setMessages(prev => [...prev, { role, text, id: crypto.randomUUID() }]);
 
   const handleSend = async () => {
     if (!input.trim() || running) return;
+
     const query = input.trim();
     setInput('');
     setRunning(true);
     addMsg('user', query);
 
-    // Diagnóstico do token — cheque em F12 > Console
+    // ── Validação do Token (F12 > Console para diagnóstico) ──────────────────
     const token = import.meta.env.VITE_HF_TOKEN;
-    console.log('[EscolaIA] Verificando VITE_HF_TOKEN...');
+    console.log('[EscolaIA] Token:', token ? `${token.slice(0, 8)}... (OK)` : 'AUSENTE — defina VITE_HF_TOKEN');
+
     if (!token) {
-      console.error('[EscolaIA] VITE_HF_TOKEN está VAZIO ou não definido.');
-      addMsg('error', 'Token VITE_HF_TOKEN ausente. Adicione-o no .env local (dev) ou nas variáveis de ambiente da Vercel (produção).');
+      addMsg('error', 'Token VITE_HF_TOKEN não encontrado. Configure no .env (desenvolvimento) ou nas variáveis da Vercel (produção).');
       setRunning(false);
       setAgentLabel('Sistema Online');
       return;
     }
-    console.log(`[EscolaIA] Token detectado: ${token.slice(0, 8)}...`);
 
-    // Instancia o cliente HfInference com o token
+    // ── Instancia o cliente UMA vez por requisição ───────────────────────────
+    // HfInference gerencia auth, Content-Type e CORS sem configuração extra
     const hf = new HfInference(token);
 
     try {
-      let carry = `Tema de Marcos: ${query}`;
+      let carry = `Tema solicitado por Marcos: ${query}`;
 
-      for (let i = 0; i < AGENTS.length; i++) {
-        const agent = AGENTS[i];
+      for (const agent of AGENTS) {
         setAgentLabel(`Agente ${agent.id} processando...`);
 
-        let output;
         try {
-          output = await callLLM(hf, agent.id, agent.sysMsg, carry);
+          const output = await callAgent(hf, agent.id, agent.sysMsg, carry);
+
+          if (agent.id === 4) {
+            // Apenas o resultado final do Agente 4 aparece na conversa
+            addMsg('assistant', output);
+          } else {
+            // Resultado intermediário: passa em silêncio para o próximo agente
+            carry = `Material do estágio anterior:\n\n${output}`;
+          }
         } catch (agentErr) {
           console.error(`[EscolaIA] Agente ${agent.id} falhou:`, agentErr);
-          throw new Error(`Erro de conexão com o Agente ${agent.id}. Detalhe: ${agentErr.message}`);
-        }
-
-        if (agent.id === 4) {
-          addMsg('assistant', output);
-        } else {
-          carry = `Material do estágio anterior:\n\n${output}`;
+          throw new Error(`Agente ${agent.id} (${agent.name}) falhou: ${agentErr.message}`);
         }
       }
     } catch (e) {
@@ -117,6 +122,7 @@ export default function App() {
     }
   };
 
+  // ─── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="shell">
       <div className="chat-wrapper">
@@ -135,13 +141,15 @@ export default function App() {
               Olá, Marcos. O que vamos construir hoje?
             </div>
           )}
+
           {messages.map(msg => (
             <div key={msg.id} className={`bubble ${msg.role}`}>
-              {msg.role === 'user' && <span className="bubble-label">Você</span>}
+              {msg.role === 'user'      && <span className="bubble-label">Você</span>}
               {msg.role === 'assistant' && <span className="bubble-label">EscolaIA</span>}
               <p className="bubble-text">{msg.text}</p>
             </div>
           ))}
+
           <div ref={bottomRef} />
         </main>
 
